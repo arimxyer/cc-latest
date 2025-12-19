@@ -11,10 +11,9 @@ import (
 	"strings"
 )
 
-const (
-	changelogURL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
-	version      = "1.0.0"
-)
+const changelogURL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
+
+var version = "dev"
 
 // ChangelogEntry represents a single version entry in the changelog
 type ChangelogEntry struct {

@@ -1,0 +1,66 @@
+version: 2
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+    flags:
+      - -trimpath
+
+archives:
+  - format: tar.gz
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - Merge pull request
+
+brews:
+  - repository:
+      owner: arimxyer
+      name: homebrew-tap
+      token: "{{ .Env.GH_PAT }}"
+    homepage: https://github.com/arimxyer/cc-latest
+    description: "Fetch the latest Claude Code changelog entry"
+    license: MIT
+
+scoops:
+  - repository:
+      owner: arimxyer
+      name: scoop-bucket
+      token: "{{ .Env.GH_PAT }}"
+    homepage: https://github.com/arimxyer/cc-latest
+    description: "Fetch the latest Claude Code changelog entry"
+    license: MIT
+
+release:
+  github:
+    owner: arimxyer
+    name: cc-latest
+  draft: false
+  prerelease: auto

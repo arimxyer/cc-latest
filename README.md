@@ -4,11 +4,26 @@ Fetch the latest Claude Code changelog entry from the command line.
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install arimxyer/tap/cc-latest
+```
+
+### Scoop (Windows)
+
+```bash
+scoop bucket add arimxyer https://github.com/arimxyer/scoop-bucket
+scoop install cc-latest
+```
+
+### Go
+
 ```bash
 go install github.com/arimxyer/cc-latest@latest
 ```
 
-Or build from source:
+### From source
 
 ```bash
 git clone https://github.com/arimxyer/cc-latest
