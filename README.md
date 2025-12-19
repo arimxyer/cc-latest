@@ -1,44 +1,60 @@
-# cc-latest
+# aic
 
-Fetch the latest Claude Code changelog entry from the command line.
+AI Coding Agent Changelog Viewer - fetch the latest changelog entries for popular AI coding assistants.
+
+## Supported Tools
+
+| Source | Command | Tool |
+|--------|---------|------|
+| `claude` | `aic claude` | Claude Code (Anthropic) |
+| `codex` | `aic codex` | Codex CLI (OpenAI) |
+| `opencode` | `aic opencode` | OpenCode (SST) |
+| `gemini` | `aic gemini` | Gemini CLI (Google) |
+| `copilot` | `aic copilot` | Copilot CLI (GitHub) |
 
 ## Installation
 
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew install arimxyer/tap/cc-latest
+brew install arimxyer/tap/aic
 ```
 
 ### Scoop (Windows)
 
 ```bash
 scoop bucket add arimxyer https://github.com/arimxyer/scoop-bucket
-scoop install cc-latest
+scoop install aic
 ```
 
 ### Go
 
 ```bash
-go install github.com/arimxyer/cc-latest@latest
+go install github.com/arimxyer/aic@latest
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/arimxyer/cc-latest
-cd cc-latest
-go build -o cc-latest
+git clone https://github.com/arimxyer/aic
+cd aic
+go build -o aic
 ```
 
 ## Usage
 
 ```bash
-cc-latest              # Latest entry as plain text
-cc-latest -json        # Latest entry as JSON
-cc-latest -md          # Latest entry as raw markdown
-cc-latest -version 2.0.70  # Specific version
-cc-latest -list        # List all versions
+aic <source> [flags]
+```
+
+### Examples
+
+```bash
+aic claude                    # Latest Claude Code changelog
+aic codex -json               # Latest Codex changelog as JSON
+aic opencode -list            # List all OpenCode versions
+aic gemini -version 0.1.0     # Specific Gemini CLI version
+aic copilot -md               # Latest Copilot changelog as markdown
 ```
 
 ## Flags
@@ -46,18 +62,18 @@ cc-latest -list        # List all versions
 | Flag | Description |
 |------|-------------|
 | `-json` | Output as JSON |
-| `-md` | Output raw markdown |
-| `-version <X.X.X>` | Fetch specific version |
+| `-md` | Output as markdown |
 | `-list` | List all available versions |
-| `-v` | Show cc-latest version |
+| `-version <ver>` | Fetch specific version |
+| `-v` | Show aic version |
 | `-h` | Show help |
 
-## Examples
+## Output Examples
 
 ### Plain text (default)
 
 ```
-$ cc-latest
+$ aic claude
 Claude Code 2.0.73
 ----------------------------------------
   * Added clickable `[Image #N]` links that open attached images
@@ -68,23 +84,24 @@ Claude Code 2.0.73
 ### JSON output
 
 ```
-$ cc-latest -json
+$ aic codex -json
 {
-  "version": "2.0.73",
+  "version": "0.0.1",
   "changes": [
-    "Added clickable `[Image #N]` links...",
-    "Fixed slow input history cycling..."
+    "Initial release",
+    "Added support for..."
   ]
 }
 ```
 
-### Specific version
+### List versions
 
 ```
-$ cc-latest -version 2.0.70
-Claude Code 2.0.70
-----------------------------------------
-  * ...
+$ aic opencode -list
+0.2.0
+0.1.9
+0.1.8
+...
 ```
 
 ## License

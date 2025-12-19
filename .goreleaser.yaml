@@ -46,8 +46,8 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.GH_PAT }}"
     directory: Formula
-    homepage: https://github.com/arimxyer/cc-latest
-    description: "Fetch the latest Claude Code changelog entry"
+    homepage: https://github.com/arimxyer/aic
+    description: "AI Coding Agent Changelog Viewer - fetch changelogs for Claude Code, Codex, OpenCode, Gemini CLI, Copilot CLI"
     license: MIT
 
 scoops:
@@ -56,13 +56,13 @@ scoops:
       name: scoop-bucket
       token: "{{ .Env.GH_PAT }}"
     directory: bucket
-    homepage: https://github.com/arimxyer/cc-latest
-    description: "Fetch the latest Claude Code changelog entry"
+    homepage: https://github.com/arimxyer/aic
+    description: "AI Coding Agent Changelog Viewer - fetch changelogs for Claude Code, Codex, OpenCode, Gemini CLI, Copilot CLI"
     license: MIT
 
 release:
   github:
     owner: arimxyer
-    name: cc-latest
+    name: aic
   draft: false
   prerelease: auto

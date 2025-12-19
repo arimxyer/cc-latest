@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,64 +10,109 @@ import (
 	"strings"
 )
 
-const changelogURL = "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
-
 var version = "dev"
 
-// ChangelogEntry represents a single version entry in the changelog
 type ChangelogEntry struct {
 	Version string   `json:"version"`
 	Changes []string `json:"changes"`
 }
 
-var (
-	jsonOutput     = flag.Bool("json", false, "Output as JSON")
-	markdownOutput = flag.Bool("md", false, "Output raw markdown")
-	targetVersion  = flag.String("version", "", "Fetch specific version (e.g., 2.0.70)")
-	listVersions   = flag.Bool("list", false, "List all available versions")
-	showVersion    = flag.Bool("v", false, "Show cc-latest version")
-	showHelp       = flag.Bool("h", false, "Show help")
-)
+type Source struct {
+	Name        string
+	DisplayName string
+	FetchFunc   func() ([]ChangelogEntry, error)
+}
+
+var sources = map[string]Source{
+	"claude": {
+		Name:        "claude",
+		DisplayName: "Claude Code",
+		FetchFunc:   fetchClaudeChangelog,
+	},
+	"codex": {
+		Name:        "codex",
+		DisplayName: "OpenAI Codex",
+		FetchFunc:   fetchCodexChangelog,
+	},
+	"opencode": {
+		Name:        "opencode",
+		DisplayName: "OpenCode",
+		FetchFunc:   fetchOpenCodeChangelog,
+	},
+	"gemini": {
+		Name:        "gemini",
+		DisplayName: "Gemini CLI",
+		FetchFunc:   fetchGeminiChangelog,
+	},
+	"copilot": {
+		Name:        "copilot",
+		DisplayName: "GitHub Copilot CLI",
+		FetchFunc:   fetchCopilotChangelog,
+	},
+}
 
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "cc-latest - Fetch the latest Claude Code changelog entry\n\n")
-		fmt.Fprintf(os.Stderr, "Usage: cc-latest [flags]\n\n")
-		fmt.Fprintf(os.Stderr, "Flags:\n")
-		flag.PrintDefaults()
-		fmt.Fprintf(os.Stderr, "\nExamples:\n")
-		fmt.Fprintf(os.Stderr, "  cc-latest              # Latest entry as plain text\n")
-		fmt.Fprintf(os.Stderr, "  cc-latest -json        # Latest entry as JSON\n")
-		fmt.Fprintf(os.Stderr, "  cc-latest -md          # Latest entry as raw markdown\n")
-		fmt.Fprintf(os.Stderr, "  cc-latest -version 2.0.70  # Specific version\n")
-		fmt.Fprintf(os.Stderr, "  cc-latest -list        # List all versions\n")
-	}
+	args := os.Args[1:]
 
-	flag.Parse()
-
-	if *showHelp {
-		flag.Usage()
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		printUsage()
 		os.Exit(0)
 	}
 
-	if *showVersion {
-		fmt.Printf("cc-latest version %s\n", version)
+	if args[0] == "-v" || args[0] == "--version" {
+		fmt.Printf("aic version %s\n", version)
 		os.Exit(0)
 	}
 
-	changelog, err := fetchChangelog()
+	if args[0] == "list-sources" {
+		for name, src := range sources {
+			fmt.Printf("  %s\t%s\n", name, src.DisplayName)
+		}
+		os.Exit(0)
+	}
+
+	sourceName := args[0]
+	source, ok := sources[sourceName]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Error: Unknown source '%s'\n\n", sourceName)
+		fmt.Fprintf(os.Stderr, "Available sources:\n")
+		for name := range sources {
+			fmt.Fprintf(os.Stderr, "  %s\n", name)
+		}
+		os.Exit(1)
+	}
+
+	var jsonOutput, mdOutput, listVersions bool
+	var targetVersion string
+
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "-json", "--json":
+			jsonOutput = true
+		case "-md", "--md":
+			mdOutput = true
+		case "-list", "--list":
+			listVersions = true
+		case "-version", "--version":
+			if i+1 < len(args) {
+				targetVersion = args[i+1]
+				i++
+			}
+		}
+	}
+
+	entries, err := source.FetchFunc()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching changelog: %v\n", err)
 		os.Exit(1)
 	}
 
-	entries := parseChangelog(changelog)
 	if len(entries) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: No changelog entries found\n")
 		os.Exit(1)
 	}
 
-	if *listVersions {
+	if listVersions {
 		for _, entry := range entries {
 			fmt.Println(entry.Version)
 		}
@@ -76,59 +120,155 @@ func main() {
 	}
 
 	var entry *ChangelogEntry
-	if *targetVersion != "" {
+	if targetVersion != "" {
 		for i := range entries {
-			if entries[i].Version == *targetVersion {
+			if entries[i].Version == targetVersion {
 				entry = &entries[i]
 				break
 			}
 		}
 		if entry == nil {
-			fmt.Fprintf(os.Stderr, "Error: Version %s not found\n", *targetVersion)
+			fmt.Fprintf(os.Stderr, "Error: Version %s not found\n", targetVersion)
 			os.Exit(1)
 		}
 	} else {
 		entry = &entries[0]
 	}
 
-	if *jsonOutput {
+	if jsonOutput {
 		outputJSON(entry)
-	} else if *markdownOutput {
+	} else if mdOutput {
 		outputMarkdown(entry)
 	} else {
-		outputPlainText(entry)
+		outputPlainText(source.DisplayName, entry)
 	}
 }
 
-func fetchChangelog() (string, error) {
-	resp, err := http.Get(changelogURL)
+func printUsage() {
+	fmt.Fprintf(os.Stderr, "aic - AI Coding Agent Changelog Viewer\n\n")
+	fmt.Fprintf(os.Stderr, "Usage: aic <source> [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "Sources:\n")
+	fmt.Fprintf(os.Stderr, "  claude      Claude Code (Anthropic)\n")
+	fmt.Fprintf(os.Stderr, "  codex       Codex CLI (OpenAI)\n")
+	fmt.Fprintf(os.Stderr, "  opencode    OpenCode (SST)\n")
+	fmt.Fprintf(os.Stderr, "  gemini      Gemini CLI (Google)\n")
+	fmt.Fprintf(os.Stderr, "  copilot     Copilot CLI (GitHub)\n\n")
+	fmt.Fprintf(os.Stderr, "Flags:\n")
+	fmt.Fprintf(os.Stderr, "  -json              Output as JSON\n")
+	fmt.Fprintf(os.Stderr, "  -md                Output as markdown\n")
+	fmt.Fprintf(os.Stderr, "  -list              List all versions\n")
+	fmt.Fprintf(os.Stderr, "  -version <ver>     Get specific version\n")
+	fmt.Fprintf(os.Stderr, "  -v, --version      Show aic version\n")
+	fmt.Fprintf(os.Stderr, "  -h, --help         Show this help\n\n")
+	fmt.Fprintf(os.Stderr, "Examples:\n")
+	fmt.Fprintf(os.Stderr, "  aic claude                    # Latest Claude Code entry\n")
+	fmt.Fprintf(os.Stderr, "  aic codex -json               # Latest Codex entry as JSON\n")
+	fmt.Fprintf(os.Stderr, "  aic opencode -list            # List OpenCode versions\n")
+	fmt.Fprintf(os.Stderr, "  aic gemini -version 0.21.0    # Specific Gemini version\n")
+}
+
+func fetchClaudeChangelog() ([]ChangelogEntry, error) {
+	url := "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
+	content, err := httpGet(url)
 	if err != nil {
-		return "", fmt.Errorf("HTTP request failed: %w", err)
+		return nil, err
+	}
+	return parseMarkdownChangelog(content, `(?m)^## (\d+\.\d+\.\d+)\s*$`), nil
+}
+
+func fetchCodexChangelog() ([]ChangelogEntry, error) {
+	return fetchGitHubReleases("openai", "codex")
+}
+
+func fetchOpenCodeChangelog() ([]ChangelogEntry, error) {
+	return fetchGitHubReleases("sst", "opencode")
+}
+
+func fetchGeminiChangelog() ([]ChangelogEntry, error) {
+	return fetchGitHubReleases("google-gemini", "gemini-cli")
+}
+
+func fetchCopilotChangelog() ([]ChangelogEntry, error) {
+	url := "https://raw.githubusercontent.com/github/copilot-cli/main/changelog.md"
+	content, err := httpGet(url)
+	if err != nil {
+		return nil, err
+	}
+	return parseMarkdownChangelog(content, `(?m)^## ([\d.]+) - \d{4}-\d{2}-\d{2}\s*$`), nil
+}
+
+func fetchGitHubReleases(owner, repo string) ([]ChangelogEntry, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/releases", owner, repo)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "aic-changelog")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+	var releases []struct {
+		TagName string `json:"tag_name"`
+		Name    string `json:"name"`
+		Body    string `json:"body"`
 	}
 
-	return string(body), nil
+	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+		return nil, fmt.Errorf("failed to parse releases: %w", err)
+	}
+
+	var entries []ChangelogEntry
+	for _, rel := range releases {
+		ver := rel.TagName
+		ver = strings.TrimPrefix(ver, "v")
+		ver = strings.TrimPrefix(ver, "rust-v")
+
+		changes := parseReleaseBody(rel.Body)
+
+		entries = append(entries, ChangelogEntry{
+			Version: ver,
+			Changes: changes,
+		})
+	}
+
+	return entries, nil
 }
 
-func parseChangelog(content string) []ChangelogEntry {
+func parseReleaseBody(body string) []string {
+	var changes []string
+	lines := strings.Split(body, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			change := strings.TrimPrefix(trimmed, "- ")
+			change = strings.TrimPrefix(change, "* ")
+			if change != "" && !strings.HasPrefix(change, "@") {
+				changes = append(changes, change)
+			}
+		}
+	}
+	return changes
+}
+
+func parseMarkdownChangelog(content, versionPattern string) []ChangelogEntry {
 	var entries []ChangelogEntry
 
-	// Split by version headers (## X.X.X)
-	versionRegex := regexp.MustCompile(`(?m)^## (\d+\.\d+\.\d+)\s*$`)
+	versionRegex := regexp.MustCompile(versionPattern)
 	matches := versionRegex.FindAllStringSubmatchIndex(content, -1)
 
 	for i, match := range matches {
 		versionEnd := match[1]
-		version := content[match[2]:match[3]]
+		ver := content[match[2]:match[3]]
 
 		var contentEnd int
 		if i+1 < len(matches) {
@@ -141,7 +281,7 @@ func parseChangelog(content string) []ChangelogEntry {
 		changes := parseChanges(sectionContent)
 
 		entries = append(entries, ChangelogEntry{
-			Version: version,
+			Version: ver,
 			Changes: changes,
 		})
 	}
@@ -159,8 +299,26 @@ func parseChanges(content string) []string {
 			changes = append(changes, change)
 		}
 	}
-
 	return changes
+}
+
+func httpGet(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
+	}
+
+	return string(body), nil
 }
 
 func outputJSON(entry *ChangelogEntry) {
@@ -179,8 +337,8 @@ func outputMarkdown(entry *ChangelogEntry) {
 	}
 }
 
-func outputPlainText(entry *ChangelogEntry) {
-	fmt.Printf("Claude Code %s\n", entry.Version)
+func outputPlainText(displayName string, entry *ChangelogEntry) {
+	fmt.Printf("%s %s\n", displayName, entry.Version)
 	fmt.Println(strings.Repeat("-", 40))
 	for _, change := range entry.Changes {
 		fmt.Printf("  * %s\n", change)
