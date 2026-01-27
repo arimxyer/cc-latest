@@ -6,7 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -31,6 +33,7 @@ type ChangelogEntry struct {
 type Source struct {
 	Name        string
 	DisplayName string
+	URL         string
 	FetchFunc   func() ([]ChangelogEntry, error)
 }
 
@@ -38,26 +41,31 @@ var sources = map[string]Source{
 	"claude": {
 		Name:        "claude",
 		DisplayName: "Claude Code",
+		URL:         "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
 		FetchFunc:   fetchClaudeChangelog,
 	},
 	"codex": {
 		Name:        "codex",
 		DisplayName: "OpenAI Codex",
+		URL:         "https://github.com/openai/codex/releases",
 		FetchFunc:   fetchCodexChangelog,
 	},
 	"opencode": {
 		Name:        "opencode",
 		DisplayName: "OpenCode",
+		URL:         "https://github.com/sst/opencode/releases",
 		FetchFunc:   fetchOpenCodeChangelog,
 	},
 	"gemini": {
 		Name:        "gemini",
 		DisplayName: "Gemini CLI",
+		URL:         "https://github.com/google-gemini/gemini-cli/releases",
 		FetchFunc:   fetchGeminiChangelog,
 	},
 	"copilot": {
 		Name:        "copilot",
 		DisplayName: "GitHub Copilot CLI",
+		URL:         "https://github.com/github/copilot-cli/blob/main/changelog.md",
 		FetchFunc:   fetchCopilotChangelog,
 	},
 }
@@ -83,22 +91,40 @@ func main() {
 	}
 
 	if args[0] == "latest" {
-		var jsonOutput bool
+		var jsonOutput, webOpen bool
 		for i := 1; i < len(args); i++ {
-			if args[i] == "-json" || args[i] == "--json" {
+			switch args[i] {
+			case "-json", "--json":
 				jsonOutput = true
+			case "-web", "--web":
+				webOpen = true
 			}
+		}
+		if webOpen {
+			for _, src := range sources {
+				openBrowser(src.URL)
+			}
+			os.Exit(0)
 		}
 		runLatestCommand(jsonOutput)
 		os.Exit(0)
 	}
 
 	if args[0] == "status" {
-		var jsonOutput bool
+		var jsonOutput, webOpen bool
 		for i := 1; i < len(args); i++ {
-			if args[i] == "-json" || args[i] == "--json" {
+			switch args[i] {
+			case "-json", "--json":
 				jsonOutput = true
+			case "-web", "--web":
+				webOpen = true
 			}
+		}
+		if webOpen {
+			for _, src := range sources {
+				openBrowser(src.URL)
+			}
+			os.Exit(0)
 		}
 		runStatusCommand(jsonOutput)
 		os.Exit(0)
@@ -115,7 +141,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var jsonOutput, mdOutput, listVersions bool
+	var jsonOutput, mdOutput, listVersions, webOpen bool
 	var targetVersion string
 
 	for i := 1; i < len(args); i++ {
@@ -126,12 +152,19 @@ func main() {
 			mdOutput = true
 		case "-list", "--list":
 			listVersions = true
+		case "-web", "--web":
+			webOpen = true
 		case "-version", "--version":
 			if i+1 < len(args) {
 				targetVersion = args[i+1]
 				i++
 			}
 		}
+	}
+
+	if webOpen {
+		openBrowser(source.URL)
+		os.Exit(0)
 	}
 
 	entries, err := source.FetchFunc()
@@ -196,6 +229,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  -md                Output as markdown\n")
 	fmt.Fprintf(os.Stderr, "  -list              List all versions\n")
 	fmt.Fprintf(os.Stderr, "  -version <ver>     Get specific version\n")
+	fmt.Fprintf(os.Stderr, "  -web               Open changelog source in browser\n")
 	fmt.Fprintf(os.Stderr, "  -v, --version      Show aic version\n")
 	fmt.Fprintf(os.Stderr, "  -h, --help         Show this help\n\n")
 	fmt.Fprintf(os.Stderr, "Examples:\n")
@@ -205,6 +239,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  aic gemini -version 0.21.0    # Specific Gemini version\n")
 	fmt.Fprintf(os.Stderr, "  aic latest                    # All releases in last 24h\n")
 	fmt.Fprintf(os.Stderr, "  aic status                    # Status table of all tools\n")
+	fmt.Fprintf(os.Stderr, "  aic claude -web               # Open Claude changelog in browser\n")
+	fmt.Fprintf(os.Stderr, "  aic status -web               # Open all changelogs in browser\n")
 }
 
 func runLatestCommand(jsonOutput bool) {
@@ -448,6 +484,21 @@ func truncateString(s string, maxLen int) string {
 		return s[:maxLen]
 	}
 	return s[:maxLen-3] + "..."
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", url)
+	default: // linux, freebsd, etc.
+		cmd = exec.Command("xdg-open", url)
+	}
+	if err := cmd.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening browser: %v\n", err)
+	}
 }
 
 func formatRelativeTime(t time.Time) string {
