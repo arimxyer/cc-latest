@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -41,7 +40,7 @@ var sources = map[string]Source{
 	"claude": {
 		Name:        "claude",
 		DisplayName: "Claude Code",
-		URL:         "https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md",
+		URL:         "https://github.com/anthropics/claude-code/releases",
 		FetchFunc:   fetchClaudeChangelog,
 	},
 	"codex": {
@@ -65,7 +64,7 @@ var sources = map[string]Source{
 	"copilot": {
 		Name:        "copilot",
 		DisplayName: "GitHub Copilot CLI",
-		URL:         "https://github.com/github/copilot-cli/blob/main/changelog.md",
+		URL:         "https://github.com/github/copilot-cli/releases",
 		FetchFunc:   fetchCopilotChangelog,
 	},
 }
@@ -573,59 +572,7 @@ func calculateAvgReleaseFreq(entries []ChangelogEntry) string {
 }
 
 func fetchClaudeChangelog() ([]ChangelogEntry, error) {
-	url := "https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md"
-	content, err := httpGet(url)
-	if err != nil {
-		return nil, err
-	}
-
-	// Regex: ## 1.2.3 or ## 1.2.3 (2024-01-07)
-	entries := parseMarkdownChangelogWithOptionalDate(content, `(?m)^## (\d+\.\d+\.\d+)(?:\s+\((\d{4}-\d{2}-\d{2})\))?\s*$`)
-
-	if len(entries) > 0 && entries[0].ReleasedAt.IsZero() {
-		commitDate := fetchGitHubFileLastCommitDate("anthropics", "claude-code", "CHANGELOG.md")
-		if !commitDate.IsZero() {
-			entries[0].ReleasedAt = commitDate
-		}
-	}
-
-	return entries, nil
-}
-
-func fetchGitHubFileLastCommitDate(owner, repo, path string) time.Time {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits?path=%s&per_page=1", owner, repo, path)
-
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return time.Time{}
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "aic-changelog")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return time.Time{}
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return time.Time{}
-	}
-
-	var commits []struct {
-		Commit struct {
-			Committer struct {
-				Date string `json:"date"`
-			} `json:"committer"`
-		} `json:"commit"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&commits); err != nil || len(commits) == 0 {
-		return time.Time{}
-	}
-
-	t, _ := time.Parse(time.RFC3339, commits[0].Commit.Committer.Date)
-	return t
+	return fetchGitHubReleases("anthropics", "claude-code")
 }
 
 func fetchCodexChangelog() ([]ChangelogEntry, error) {
@@ -641,12 +588,7 @@ func fetchGeminiChangelog() ([]ChangelogEntry, error) {
 }
 
 func fetchCopilotChangelog() ([]ChangelogEntry, error) {
-	url := "https://raw.githubusercontent.com/github/copilot-cli/main/changelog.md"
-	content, err := httpGet(url)
-	if err != nil {
-		return nil, err
-	}
-	return parseMarkdownChangelogWithDate(content, `(?m)^## ([\d.]+) - (\d{4}-\d{2}-\d{2})\s*$`), nil
+	return fetchGitHubReleases("github", "copilot-cli")
 }
 
 func fetchGitHubReleases(owner, repo string) ([]ChangelogEntry, error) {
@@ -748,134 +690,6 @@ func parseReleaseBody(body string) ([]Section, []string) {
 	}
 
 	return sections, ungroupedChanges
-}
-
-func parseMarkdownChangelog(content, versionPattern string) []ChangelogEntry {
-	var entries []ChangelogEntry
-
-	versionRegex := regexp.MustCompile(versionPattern)
-	matches := versionRegex.FindAllStringSubmatchIndex(content, -1)
-
-	for i, match := range matches {
-		versionEnd := match[1]
-		ver := content[match[2]:match[3]]
-
-		var contentEnd int
-		if i+1 < len(matches) {
-			contentEnd = matches[i+1][0]
-		} else {
-			contentEnd = len(content)
-		}
-
-		sectionContent := content[versionEnd:contentEnd]
-		changes := parseChanges(sectionContent)
-
-		entries = append(entries, ChangelogEntry{
-			Version: ver,
-			Changes: changes,
-		})
-	}
-
-	return entries
-}
-
-func parseMarkdownChangelogWithDate(content, versionPattern string) []ChangelogEntry {
-	var entries []ChangelogEntry
-
-	versionRegex := regexp.MustCompile(versionPattern)
-	matches := versionRegex.FindAllStringSubmatch(content, -1)
-	matchIndexes := versionRegex.FindAllStringSubmatchIndex(content, -1)
-
-	for i, match := range matches {
-		ver := match[1]
-		dateStr := match[2]
-
-		releasedAt, _ := time.Parse("2006-01-02", dateStr)
-
-		var contentEnd int
-		if i+1 < len(matchIndexes) {
-			contentEnd = matchIndexes[i+1][0]
-		} else {
-			contentEnd = len(content)
-		}
-
-		sectionContent := content[matchIndexes[i][1]:contentEnd]
-		changes := parseChanges(sectionContent)
-
-		entries = append(entries, ChangelogEntry{
-			Version:    ver,
-			ReleasedAt: releasedAt,
-			Changes:    changes,
-		})
-	}
-
-	return entries
-}
-
-func parseMarkdownChangelogWithOptionalDate(content, versionPattern string) []ChangelogEntry {
-	var entries []ChangelogEntry
-
-	versionRegex := regexp.MustCompile(versionPattern)
-	matches := versionRegex.FindAllStringSubmatch(content, -1)
-	matchIndexes := versionRegex.FindAllStringSubmatchIndex(content, -1)
-
-	for i, match := range matches {
-		ver := match[1]
-		var releasedAt time.Time
-		if len(match) > 2 && match[2] != "" {
-			releasedAt, _ = time.Parse("2006-01-02", match[2])
-		}
-
-		var contentEnd int
-		if i+1 < len(matchIndexes) {
-			contentEnd = matchIndexes[i+1][0]
-		} else {
-			contentEnd = len(content)
-		}
-
-		sectionContent := content[matchIndexes[i][1]:contentEnd]
-		changes := parseChanges(sectionContent)
-
-		entries = append(entries, ChangelogEntry{
-			Version:    ver,
-			ReleasedAt: releasedAt,
-			Changes:    changes,
-		})
-	}
-
-	return entries
-}
-
-func parseChanges(content string) []string {
-	var changes []string
-	lines := strings.Split(content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "- ") {
-			change := strings.TrimPrefix(trimmed, "- ")
-			changes = append(changes, change)
-		}
-	}
-	return changes
-}
-
-func httpGet(url string) (string, error) {
-	resp, err := http.Get(url)
-	if err != nil {
-		return "", fmt.Errorf("HTTP request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
-	}
-
-	return string(body), nil
 }
 
 func outputJSON(entry *ChangelogEntry) {
