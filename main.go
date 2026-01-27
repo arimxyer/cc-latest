@@ -30,43 +30,25 @@ type ChangelogEntry struct {
 }
 
 type Source struct {
-	Name        string
 	DisplayName string
-	URL         string
-	FetchFunc   func() ([]ChangelogEntry, error)
+	Owner       string
+	Repo        string
+}
+
+func (s Source) URL() string {
+	return fmt.Sprintf("https://github.com/%s/%s/releases", s.Owner, s.Repo)
+}
+
+func (s Source) Fetch() ([]ChangelogEntry, error) {
+	return fetchGitHubReleases(s.Owner, s.Repo)
 }
 
 var sources = map[string]Source{
-	"claude": {
-		Name:        "claude",
-		DisplayName: "Claude Code",
-		URL:         "https://github.com/anthropics/claude-code/releases",
-		FetchFunc:   fetchClaudeChangelog,
-	},
-	"codex": {
-		Name:        "codex",
-		DisplayName: "OpenAI Codex",
-		URL:         "https://github.com/openai/codex/releases",
-		FetchFunc:   fetchCodexChangelog,
-	},
-	"opencode": {
-		Name:        "opencode",
-		DisplayName: "OpenCode",
-		URL:         "https://github.com/sst/opencode/releases",
-		FetchFunc:   fetchOpenCodeChangelog,
-	},
-	"gemini": {
-		Name:        "gemini",
-		DisplayName: "Gemini CLI",
-		URL:         "https://github.com/google-gemini/gemini-cli/releases",
-		FetchFunc:   fetchGeminiChangelog,
-	},
-	"copilot": {
-		Name:        "copilot",
-		DisplayName: "GitHub Copilot CLI",
-		URL:         "https://github.com/github/copilot-cli/releases",
-		FetchFunc:   fetchCopilotChangelog,
-	},
+	"claude":   {DisplayName: "Claude Code", Owner: "anthropics", Repo: "claude-code"},
+	"codex":    {DisplayName: "OpenAI Codex", Owner: "openai", Repo: "codex"},
+	"opencode": {DisplayName: "OpenCode", Owner: "sst", Repo: "opencode"},
+	"gemini":   {DisplayName: "Gemini CLI", Owner: "google-gemini", Repo: "gemini-cli"},
+	"copilot":  {DisplayName: "GitHub Copilot CLI", Owner: "github", Repo: "copilot-cli"},
 }
 
 func main() {
@@ -101,7 +83,7 @@ func main() {
 		}
 		if webOpen {
 			for _, src := range sources {
-				openBrowser(src.URL)
+				openBrowser(src.URL())
 			}
 			os.Exit(0)
 		}
@@ -121,7 +103,7 @@ func main() {
 		}
 		if webOpen {
 			for _, src := range sources {
-				openBrowser(src.URL)
+				openBrowser(src.URL())
 			}
 			os.Exit(0)
 		}
@@ -162,11 +144,11 @@ func main() {
 	}
 
 	if webOpen {
-		openBrowser(source.URL)
+		openBrowser(source.URL())
 		os.Exit(0)
 	}
 
-	entries, err := source.FetchFunc()
+	entries, err := source.Fetch()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error fetching changelog: %v\n", err)
 		os.Exit(1)
@@ -259,7 +241,7 @@ func runLatestCommand(jsonOutput bool) {
 		wg.Add(1)
 		go func(name string, src Source) {
 			defer wg.Done()
-			entries, err := src.FetchFunc()
+			entries, err := src.Fetch()
 			if err != nil {
 				results <- result{source: name, display: src.DisplayName, err: err}
 				return
@@ -328,7 +310,7 @@ func runStatusCommand(jsonOutput bool) {
 		wg.Add(1)
 		go func(name string, src Source) {
 			defer wg.Done()
-			entries, err := src.FetchFunc()
+			entries, err := src.Fetch()
 			results <- statusResult{
 				source:      name,
 				displayName: src.DisplayName,
@@ -569,26 +551,6 @@ func calculateAvgReleaseFreq(entries []ChangelogEntry) string {
 		return fmt.Sprintf("~%dw", weeks)
 	}
 	return fmt.Sprintf("~%dmo", months)
-}
-
-func fetchClaudeChangelog() ([]ChangelogEntry, error) {
-	return fetchGitHubReleases("anthropics", "claude-code")
-}
-
-func fetchCodexChangelog() ([]ChangelogEntry, error) {
-	return fetchGitHubReleases("openai", "codex")
-}
-
-func fetchOpenCodeChangelog() ([]ChangelogEntry, error) {
-	return fetchGitHubReleases("sst", "opencode")
-}
-
-func fetchGeminiChangelog() ([]ChangelogEntry, error) {
-	return fetchGitHubReleases("google-gemini", "gemini-cli")
-}
-
-func fetchCopilotChangelog() ([]ChangelogEntry, error) {
-	return fetchGitHubReleases("github", "copilot-cli")
 }
 
 func fetchGitHubReleases(owner, repo string) ([]ChangelogEntry, error) {
