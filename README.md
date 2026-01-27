@@ -50,6 +50,7 @@ go build -o aic
 ```bash
 aic <source> [flags]
 aic latest [flags]
+aic status [flags]
 ```
 
 ### Examples
@@ -61,10 +62,33 @@ aic opencode -list            # List all OpenCode versions
 aic gemini -version 0.1.0     # Specific Gemini CLI version
 aic copilot -md               # Latest Copilot changelog as markdown
 aic latest                    # All releases from last 24 hours
-aic latest -json              # Recent releases as JSON
+aic status                    # Status table of all tools
+aic claude -web               # Open Claude changelog in browser
 ```
 
 ## Commands
+
+### `aic status`
+
+Show a status table of all tools with version info, update recency, and release frequency.
+
+```
+$ aic status
+┌──────────────────────┬─────┬──────────────┬──────────────┬────────────┬─────────────────────┐
+│ Tool                 │ 24h │ Version      │ Previous     │ Updated    │ Vers. Release Freq. │
+├──────────────────────┼─────┼──────────────┼──────────────┼────────────┼─────────────────────┤
+│ OpenAI Codex         │ [✓] │ 0.92.0       │ 0.92.0-al... │ 6h ago     │ ~3h                 │
+│ Claude Code          │ [✓] │ 2.1.20       │ 2.1.19       │ 14h ago    │ -                   │
+│ Gemini CLI           │ [✓] │ 0.27.0-ni... │ 0.27.0-ni... │ 17h ago    │ ~15h                │
+│ GitHub Copilot CLI   │     │ 0.0.395      │ 0.0.394      │ 1d ago     │ ~18h                │
+│ OpenCode             │     │ 1.1.36       │ 1.1.35       │ 1d ago     │ ~13h                │
+└──────────────────────┴─────┴──────────────┴──────────────┴────────────┴─────────────────────┘
+```
+
+- **24h**: Shows `[✓]` if updated in the last 24 hours
+- **Version/Previous**: Current and previous version numbers
+- **Updated**: Relative time since last release
+- **Vers. Release Freq.**: Average time between releases (calculated from last 10 releases)
 
 ### `aic latest`
 
@@ -101,6 +125,7 @@ Claude Code 2.0.73 (2025-12-19)
 | `-md` | Output as markdown |
 | `-list` | List all available versions |
 | `-version <ver>` | Fetch specific version |
+| `-web` | Open changelog source in browser |
 | `-v` | Show aic version |
 | `-h` | Show help |
 
