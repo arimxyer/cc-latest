@@ -93,6 +93,17 @@ func main() {
 		os.Exit(0)
 	}
 
+	if args[0] == "status" {
+		var jsonOutput bool
+		for i := 1; i < len(args); i++ {
+			if args[i] == "-json" || args[i] == "--json" {
+				jsonOutput = true
+			}
+		}
+		runStatusCommand(jsonOutput)
+		os.Exit(0)
+	}
+
 	sourceName := args[0]
 	source, ok := sources[sourceName]
 	if !ok {
@@ -169,7 +180,8 @@ func main() {
 func printUsage() {
 	fmt.Fprintf(os.Stderr, "aic - AI Coding Agent Changelog Viewer\n\n")
 	fmt.Fprintf(os.Stderr, "Usage: aic <source> [flags]\n")
-	fmt.Fprintf(os.Stderr, "       aic latest [flags]\n\n")
+	fmt.Fprintf(os.Stderr, "       aic latest [flags]\n")
+	fmt.Fprintf(os.Stderr, "       aic status [flags]\n\n")
 	fmt.Fprintf(os.Stderr, "Sources:\n")
 	fmt.Fprintf(os.Stderr, "  claude      Claude Code (Anthropic)\n")
 	fmt.Fprintf(os.Stderr, "  codex       Codex CLI (OpenAI)\n")
@@ -177,7 +189,8 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  gemini      Gemini CLI (Google)\n")
 	fmt.Fprintf(os.Stderr, "  copilot     Copilot CLI (GitHub)\n\n")
 	fmt.Fprintf(os.Stderr, "Commands:\n")
-	fmt.Fprintf(os.Stderr, "  latest             Show releases from all sources in last 24h\n\n")
+	fmt.Fprintf(os.Stderr, "  latest             Show releases from all sources in last 24h\n")
+	fmt.Fprintf(os.Stderr, "  status             Show status table of all sources\n\n")
 	fmt.Fprintf(os.Stderr, "Flags:\n")
 	fmt.Fprintf(os.Stderr, "  -json              Output as JSON\n")
 	fmt.Fprintf(os.Stderr, "  -md                Output as markdown\n")
@@ -191,6 +204,7 @@ func printUsage() {
 	fmt.Fprintf(os.Stderr, "  aic opencode -list            # List OpenCode versions\n")
 	fmt.Fprintf(os.Stderr, "  aic gemini -version 0.21.0    # Specific Gemini version\n")
 	fmt.Fprintf(os.Stderr, "  aic latest                    # All releases in last 24h\n")
+	fmt.Fprintf(os.Stderr, "  aic status                    # Status table of all tools\n")
 }
 
 func runLatestCommand(jsonOutput bool) {
@@ -261,6 +275,250 @@ func runLatestCommand(jsonOutput bool) {
 			outputPlainText(entry.Source, &entry)
 		}
 	}
+}
+
+func runStatusCommand(jsonOutput bool) {
+	type statusResult struct {
+		source      string
+		displayName string
+		entries     []ChangelogEntry
+		err         error
+	}
+
+	results := make(chan statusResult, len(sources))
+	var wg sync.WaitGroup
+
+	// Fetch up to 10 entries from each source concurrently
+	for name, src := range sources {
+		wg.Add(1)
+		go func(name string, src Source) {
+			defer wg.Done()
+			entries, err := src.FetchFunc()
+			results <- statusResult{
+				source:      name,
+				displayName: src.DisplayName,
+				entries:     entries,
+				err:         err,
+			}
+		}(name, src)
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	type statusEntry struct {
+		Name            string  `json:"name"`
+		Version         string  `json:"version"`
+		PreviousVersion string  `json:"previous_version"`
+		UpdatedAgo      string  `json:"updated_ago"`
+		UpdatedRecently bool    `json:"updated_recently"`
+		AvgReleaseFreq  string  `json:"avg_release_freq"`
+		releasedAt      time.Time
+	}
+
+	var statusEntries []statusEntry
+	cutoff := time.Now().Add(-24 * time.Hour)
+
+	for r := range results {
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to fetch %s: %v\n", r.displayName, r.err)
+			continue
+		}
+
+		if len(r.entries) == 0 {
+			continue
+		}
+
+		entry := statusEntry{
+			Name:            r.displayName,
+			Version:         r.entries[0].Version,
+			PreviousVersion: "-",
+			UpdatedAgo:      "-",
+			UpdatedRecently: false,
+			AvgReleaseFreq:  "-",
+			releasedAt:      r.entries[0].ReleasedAt,
+		}
+
+		if len(r.entries) > 1 {
+			entry.PreviousVersion = r.entries[1].Version
+		}
+
+		if !r.entries[0].ReleasedAt.IsZero() {
+			entry.UpdatedAgo = formatRelativeTime(r.entries[0].ReleasedAt)
+			entry.UpdatedRecently = r.entries[0].ReleasedAt.After(cutoff)
+		}
+
+		// Calculate average release frequency from up to 10 entries
+		entry.AvgReleaseFreq = calculateAvgReleaseFreq(r.entries)
+
+		statusEntries = append(statusEntries, entry)
+	}
+
+	// Sort by most recently updated
+	sort.Slice(statusEntries, func(i, j int) bool {
+		if statusEntries[i].releasedAt.IsZero() && statusEntries[j].releasedAt.IsZero() {
+			return statusEntries[i].Name < statusEntries[j].Name
+		}
+		if statusEntries[i].releasedAt.IsZero() {
+			return false
+		}
+		if statusEntries[j].releasedAt.IsZero() {
+			return true
+		}
+		return statusEntries[i].releasedAt.After(statusEntries[j].releasedAt)
+	})
+
+	if jsonOutput {
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		encoder.Encode(statusEntries)
+		return
+	}
+
+	// Print table with borders
+	// Column widths
+	const (
+		colTool     = 20
+		col24h      = 3
+		colVersion  = 12
+		colPrevious = 12
+		colUpdated  = 10
+		colFreq     = 19
+	)
+
+	// Top border
+	fmt.Printf("┌%s┬%s┬%s┬%s┬%s┬%s┐\n",
+		strings.Repeat("─", colTool+2),
+		strings.Repeat("─", col24h+2),
+		strings.Repeat("─", colVersion+2),
+		strings.Repeat("─", colPrevious+2),
+		strings.Repeat("─", colUpdated+2),
+		strings.Repeat("─", colFreq+2))
+
+	// Header row
+	fmt.Printf("│ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │ %-*s │\n",
+		colTool, "Tool",
+		col24h, "24h",
+		colVersion, "Version",
+		colPrevious, "Previous",
+		colUpdated, "Updated",
+		colFreq, "Vers. Release Freq.")
+
+	// Header separator
+	fmt.Printf("├%s┼%s┼%s┼%s┼%s┼%s┤\n",
+		strings.Repeat("─", colTool+2),
+		strings.Repeat("─", col24h+2),
+		strings.Repeat("─", colVersion+2),
+		strings.Repeat("─", colPrevious+2),
+		strings.Repeat("─", colUpdated+2),
+		strings.Repeat("─", colFreq+2))
+
+	// Data rows
+	for _, e := range statusEntries {
+		recentMarker := "   "
+		if e.UpdatedRecently {
+			recentMarker = "[✓]"
+		}
+		fmt.Printf("│ %-*s │ %s │ %-*s │ %-*s │ %-*s │ %-*s │\n",
+			colTool, truncateString(e.Name, colTool),
+			recentMarker,
+			colVersion, truncateString(e.Version, colVersion),
+			colPrevious, truncateString(e.PreviousVersion, colPrevious),
+			colUpdated, e.UpdatedAgo,
+			colFreq, e.AvgReleaseFreq)
+	}
+
+	// Bottom border
+	fmt.Printf("└%s┴%s┴%s┴%s┴%s┴%s┘\n",
+		strings.Repeat("─", colTool+2),
+		strings.Repeat("─", col24h+2),
+		strings.Repeat("─", colVersion+2),
+		strings.Repeat("─", colPrevious+2),
+		strings.Repeat("─", colUpdated+2),
+		strings.Repeat("─", colFreq+2))
+}
+
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	if maxLen <= 3 {
+		return s[:maxLen]
+	}
+	return s[:maxLen-3] + "..."
+}
+
+func formatRelativeTime(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+
+	duration := time.Since(t)
+
+	minutes := int(duration.Minutes())
+	hours := int(duration.Hours())
+	days := hours / 24
+	weeks := days / 7
+	months := days / 30
+
+	if minutes < 60 {
+		return fmt.Sprintf("%dm ago", minutes)
+	}
+	if hours < 24 {
+		return fmt.Sprintf("%dh ago", hours)
+	}
+	if days < 7 {
+		return fmt.Sprintf("%dd ago", days)
+	}
+	if weeks < 4 {
+		return fmt.Sprintf("%dw ago", weeks)
+	}
+	return fmt.Sprintf("%dmo ago", months)
+}
+
+func calculateAvgReleaseFreq(entries []ChangelogEntry) string {
+	// Need at least 2 entries with valid dates to calculate average
+	var validEntries []ChangelogEntry
+	for _, e := range entries {
+		if !e.ReleasedAt.IsZero() {
+			validEntries = append(validEntries, e)
+		}
+		if len(validEntries) >= 10 {
+			break
+		}
+	}
+
+	if len(validEntries) < 2 {
+		return "-"
+	}
+
+	// Calculate intervals between consecutive releases
+	var totalDuration time.Duration
+	for i := 0; i < len(validEntries)-1; i++ {
+		interval := validEntries[i].ReleasedAt.Sub(validEntries[i+1].ReleasedAt)
+		totalDuration += interval
+	}
+
+	avgDuration := totalDuration / time.Duration(len(validEntries)-1)
+
+	// Format as relative time
+	hours := int(avgDuration.Hours())
+	days := hours / 24
+	weeks := days / 7
+	months := days / 30
+
+	if days < 1 {
+		return fmt.Sprintf("~%dh", hours)
+	}
+	if days < 7 {
+		return fmt.Sprintf("~%dd", days)
+	}
+	if weeks < 4 {
+		return fmt.Sprintf("~%dw", weeks)
+	}
+	return fmt.Sprintf("~%dmo", months)
 }
 
 func fetchClaudeChangelog() ([]ChangelogEntry, error) {

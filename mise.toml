@@ -1,0 +1,14 @@
+[tools]
+go = "latest"
+
+[tasks.build]
+description = "Build the aic binary"
+run = "go build -o aic ."
+
+[tasks.run]
+description = "Run aic with arguments"
+run = "go run . {{arg(name='args', var=true)}}"
+
+[tasks.test]
+description = "Run tests"
+run = "go test ./..."
